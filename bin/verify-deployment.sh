@@ -22,11 +22,15 @@ done
 kubectl set image --local -f deploy/deployment.yaml "accounts=$image" -o yaml | "${ns[@]}" apply -f -
 "${ns[@]}" apply -f deploy/service.yaml
 "${ns[@]}" rollout status deployment/accounts --timeout=180s
-"${ns[@]}" get deployment,pod,service -l app=accounts -o wide
+echo '$ kubectl get all -l app=accounts -o wide'
+"${ns[@]}" get all -l app=accounts -o wide | tee /tmp/accounts-kube-resources.txt
+echo '$ docker image ls'
+docker image ls "$image" | tee /tmp/accounts-kube-images.txt
 "${ns[@]}" port-forward service/accounts 18080:8080 >/tmp/accounts-ci-forward.log 2>&1 &
 forward_pid=$!
 trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
 curl --fail --silent --show-error --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:18080/health | jq -e '.status=="OK"'
+curl -fsS http://127.0.0.1:18080/ | tee /tmp/accounts-kube-app.json | jq -e '.name=="Account REST API Service"'
 base=http://127.0.0.1:18080/accounts
 id=$(curl -fsS -H 'Content-Type: application/json' -d '{"name":"Demo","email":"demo@example.test","address":"Test Street"}' "$base" | jq -er .id)
 curl -fsS "$base/$id" | jq -e --argjson id "$id" '.id==$id and .name=="Demo"'

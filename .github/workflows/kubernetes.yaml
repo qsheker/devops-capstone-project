@@ -22,3 +22,12 @@ jobs:
           kind load docker-image accounts:ci --name accounts-ci
       - name: Exercise the deployed service
         run: bin/verify-deployment.sh accounts:ci
+      - name: Retain deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: accounts-deployment-evidence
+          path: |
+            /tmp/accounts-kube-resources.txt
+            /tmp/accounts-kube-images.txt
+            /tmp/accounts-kube-app.json
+          if-no-files-found: error
