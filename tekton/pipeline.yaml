@@ -1,38 +1,46 @@
-#
-# This pipeline needs the following tasks from Tekton Catalog
-#   - git-clone
-#   - flake8
-#
----
 apiVersion: tekton.dev/v1beta1
 kind: Pipeline
-metadata:  
+metadata:
   name: cd-pipeline
 spec:
   workspaces:
     - name: pipeline-workspace
   params:
-    - name: repo-url
-    - name: branch
-      default: main
+    - {name: repo-url, type: string}
+    - {name: branch, type: string, default: main}
+    - {name: build-image, type: string}
+    - {name: registry-tls-verify, type: string, default: "true"}
   tasks:
-    - name: init
-      workspaces:
-        - name: source
-          workspace: pipeline-workspace          
-      taskRef:
-        name: cleanup
-
     - name: clone
-      workspaces:
-        - name: output
-          workspace: pipeline-workspace          
-      taskRef:
-        name: git-clone
+      taskRef: {name: git-clone}
+      workspaces: [{name: output, workspace: pipeline-workspace}]
       params:
-      - name: url
-        value: $(params.repo-url)
-      - name: revision
-        value: $(params.branch)
-      runAfter:
-        - init
+        - {name: url, value: "$(params.repo-url)"}
+        - {name: revision, value: "$(params.branch)"}
+        - {name: deleteExisting, value: "true"}
+    - name: lint
+      runAfter: [clone]
+      taskRef: {name: flake8}
+      workspaces: [{name: source, workspace: pipeline-workspace}]
+      params:
+        - {name: requirements_file, value: ""}
+        - name: args
+          value: ["--max-line-length=127", "--max-complexity=10", "--statistics"]
+    - name: tests
+      runAfter: [clone]
+      taskRef: {name: nose}
+      workspaces: [{name: source, workspace: pipeline-workspace}]
+    - name: build
+      runAfter: [lint, tests]
+      taskRef: {name: buildah, kind: ClusterTask}
+      workspaces: [{name: source, workspace: pipeline-workspace}]
+      params:
+        - {name: IMAGE, value: "$(params.build-image)"}
+        - {name: STORAGE_DRIVER, value: vfs}
+        - {name: TLSVERIFY, value: "$(params.registry-tls-verify)"}
+    - name: deploy
+      runAfter: [build]
+      taskRef: {name: deploy-accounts}
+      workspaces: [{name: source, workspace: pipeline-workspace}]
+      params:
+        - {name: image, value: "$(params.build-image)"}
