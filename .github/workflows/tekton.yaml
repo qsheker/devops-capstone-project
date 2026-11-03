@@ -1,0 +1,39 @@
+name: Tekton delivery verification
+on:
+  pull_request:
+    branches: [main]
+    paths: ['tekton/**', 'bin/verify-tekton.sh', '.github/workflows/tekton.yaml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  delivery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Start the isolated Kubernetes cluster
+        run: |
+          cat > /tmp/accounts-kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+            - |-
+              [plugins."io.containerd.grpc.v1.cri".registry]
+                config_path = "/etc/containerd/certs.d"
+          EOF
+          kind create cluster --name accounts-tekton --image kindest/node:v1.30.4 --config /tmp/accounts-kind.yaml --wait 120s
+      - name: Run the actual Tekton pipeline
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bin/verify-tekton.sh
+      - name: Retain the PipelineRun log and status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tekton-run
+          path: run-evidence/
+          if-no-files-found: ignore
