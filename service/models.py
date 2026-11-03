@@ -115,23 +115,26 @@ class Account(db.Model, PersistentBase):
         Args:
             data (dict): A dictionary containing the resource data
         """
-        try:
-            self.name = data["name"]
-            self.email = data["email"]
-            self.address = data["address"]
-            self.phone_number = data.get("phone_number")
-            date_joined = data.get("date_joined")
-            if date_joined:
-                self.date_joined = date.fromisoformat(date_joined)
+        if not isinstance(data, dict):
+            raise DataValidationError("Account data must be a JSON object")
+        values = {}
+        for field, limit in (("name", 64), ("email", 64), ("address", 256), ("phone_number", 32)):
+            value = data.get(field)
+            if value is None and field == "phone_number":
+                values[field] = None
+            elif not isinstance(value, str) or not value.strip() or len(value) > limit:
+                raise DataValidationError(f"Invalid or missing {field}")
             else:
-                self.date_joined = date.today()
-        except KeyError as error:
-            raise DataValidationError("Invalid Account: missing " + error.args[0]) from error
-        except TypeError as error:
-            raise DataValidationError(
-                "Invalid Account: body of request contained "
-                "bad or no data - " + error.args[0]
-            ) from error
+                values[field] = value
+        try:
+            joined = data.get("date_joined")
+            joined = date.fromisoformat(joined) if joined is not None else (self.date_joined or date.today())
+        except (TypeError, ValueError) as error:
+            raise DataValidationError("date_joined must be an ISO date") from error
+        # Validate the whole replacement before changing an object tracked by SQLAlchemy.
+        for field, value in values.items():
+            setattr(self, field, value)
+        self.date_joined = joined
         return self
 
     @classmethod

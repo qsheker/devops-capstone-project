@@ -124,3 +124,66 @@ class TestAccountService(TestCase):
         self.assertEqual(response.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
 
     # ADD YOUR TEST CASES HERE ...
+
+    def test_follow_create_location_to_read_account(self):
+        account = AccountFactory()
+        response = self.client.post(BASE_URL, json=account.serialize())
+        location = response.headers["Location"]
+        found = self.client.get(location)
+        self.assertEqual(found.status_code, 200)
+        self.assertEqual(found.get_json(), response.get_json())
+
+    def test_list_empty_and_populated(self):
+        empty = self.client.get(BASE_URL)
+        self.assertEqual((empty.status_code, empty.get_json()), (200, []))
+        saved = self._create_accounts(2)
+        self.assertEqual({row["id"] for row in self.client.get(BASE_URL).get_json()},
+                         {account.id for account in saved})
+
+    def test_unknown_account(self):
+        data = AccountFactory().serialize()
+        for method in (self.client.get, self.client.put):
+            response = method(f"{BASE_URL}/999999", json=data)
+            self.assertEqual(response.status_code, 404)
+
+    def test_update_is_persistent_and_preserves_identifier(self):
+        old, other = self._create_accounts(2)
+        payload = dict(old.serialize(), address="44 Test Street", id=other.id)
+        path = f"{BASE_URL}/{old.id}"
+        response = self.client.put(path, json=payload)
+        self.assertEqual(response.status_code, 200)
+        updated = self.client.get(path).get_json()
+        self.assertEqual(updated["id"], old.id)
+        self.assertEqual(updated["address"], "44 Test Street")
+        self.assertEqual(self.client.get(f"{BASE_URL}/{other.id}").get_json(), other.serialize())
+
+    def test_rejected_update_leaves_account_intact(self):
+        old, = self._create_accounts(1)
+        path = f"{BASE_URL}/{old.id}"
+        before = old.serialize()
+        for data in ({"name": "partial write"}, dict(before, date_joined="invalid"), []):
+            self.assertEqual(self.client.put(path, json=data).status_code, 400)
+            self.assertEqual(self.client.get(path).get_json(), before)
+        self.assertEqual(self.client.put(path, data="text", content_type="text/plain").status_code, 415)
+
+    def test_delete_only_requested_account(self):
+        old, other = self._create_accounts(2)
+        path = f"{BASE_URL}/{old.id}"
+        response = self.client.delete(path)
+        self.assertEqual((response.status_code, response.data), (204, b""))
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.delete(path).status_code, 204)
+        self.assertEqual(self.client.get(f"{BASE_URL}/{other.id}").status_code, 200)
+
+    def test_disallowed_method_returns_json_error(self):
+        response = self.client.patch(BASE_URL, json={})
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.get_json()["status"], 405)
+
+    def test_require_only_mandatory_fields(self):
+        data = {"name": "Example", "email": "sample@example.test", "address": "Training Street"}
+        response = self.client.post(BASE_URL, json=data)
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.get_json()["phone_number"])
+        stored = self.client.get(response.headers["Location"]).get_json()
+        self.assertEqual(stored["date_joined"], response.get_json()["date_joined"])
