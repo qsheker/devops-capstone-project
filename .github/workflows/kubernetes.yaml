@@ -1,0 +1,24 @@
+name: Kubernetes smoke test
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build the application image
+        run: docker build -t accounts:ci .
+      - name: Create an isolated cluster
+        run: |
+          kind create cluster --name accounts-ci --wait 120s
+          kind load docker-image accounts:ci --name accounts-ci
+      - name: Exercise the deployed service
+        run: bin/verify-deployment.sh accounts:ci
